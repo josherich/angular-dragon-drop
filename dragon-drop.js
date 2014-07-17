@@ -15,10 +15,10 @@ angular.module('btford.dragon-drop', []).
            / /\ \ \ _ \/ _ /      /    \
           / / /\ \ {*}\/{*}      /  / \ \
           | | | \ \( (00) )     /  // |\ \
-          | | | |\ \(V""V)\    /  / | || \| 
-          | | | | \ |^--^| \  /  / || || || 
+          | | | |\ \(V""V)\    /  / | || \|
+          | | | | \ |^--^| \  /  / || || ||
          / / /  | |( WWWW__ \/  /| || || ||
-        | | | | | |  \______\  / / || || || 
+        | | | | | |  \______\  / / || || ||
         | | | / | | )|______\ ) | / | || ||
         / / /  / /  /______/   /| \ \ || ||
        / / /  / /  /\_____/  |/ /__\ \ \ \ \
@@ -32,17 +32,21 @@ angular.module('btford.dragon-drop', []).
            \   \________\_    _\               ____/
          __/   /\_____ __/   /   )\_,      _____/
         /  ___/  \uuuu/  ___/___)    \______/
-        VVV  V        VVV  V 
+        VVV  V        VVV  V
     */
     // this ASCII dragon is really important, do not remove
 
     var dragValue,
       dragKey,
+      dragIndex,
       dragOrigin,
       dragDuplicate = false,
       floaty,
       offsetX,
-      offsetY;
+      offsetY,
+      prev_insertTarget = null,
+      beginDrag,
+      delayDrag;
 
     var drag = function (ev) {
       var x = ev.clientX - offsetX,
@@ -50,6 +54,27 @@ angular.module('btford.dragon-drop', []).
 
       floaty.css('left', x + 'px');
       floaty.css('top', y + 'px');
+      floaty.css('opacity', '0.7');
+
+      // mark ready to insert
+      var insertArea = getElementBehindPoint(floaty, ev.clientX, ev.clientY);
+
+      while (insertArea.length > 0 && !insertArea.hasClass('site-block')) {
+        insertArea = insertArea.parent();
+      }
+
+      if (prev_insertTarget != insertArea[0]) {
+        if (prev_insertTarget) {
+          $($(prev_insertTarget).find('.site-inner')[0]).removeClass('ready-insert');
+        }
+        prev_insertTarget = insertArea[0];
+        if (insertArea.length > 0) {
+          var target = insertArea[0];
+          var offset = getElementOffset(target)
+
+          $($(target).find('.site-inner')[0]).toggleClass('ready-insert');
+        }
+      }
     };
 
     var remove = function (collection, index) {
@@ -64,10 +89,24 @@ angular.module('btford.dragon-drop', []).
 
     var add = function (collection, item, key) {
       if (collection instanceof Array) {
-        collection.push(item);
+        collection.splice(collection.length -1, 0, item);
       } else {
         collection[key] = item;
       }
+    };
+
+    var insertBefore = function (collection, item, pos) {
+      collection.splice(pos, 0, item);
+      // var originPos = dragIndex;
+      // if (originPos > pos) {
+      //   collection.splice(originPos, 1);
+      //   collection.splice(pos, 0, item);
+      // } else if (originPos < pos) {
+      //   collection.splice(originPos, 1);
+      //   collection.splice(pos-1, 0, item);
+      // } else {
+      //   return;
+      // }
     };
 
     var documentBody = angular.element($document[0].body);
@@ -114,6 +153,14 @@ angular.module('btford.dragon-drop', []).
       };
     };
 
+    var triggerDrag = function(func){
+      return setTimeout(func, 200);
+    };
+
+    var clearDrag = function(id){
+      clearTimeout(id);
+    };
+
     // Get the element at position (`x`, `y`) behind the given element
     var getElementBehindPoint = function (behind, x, y) {
       var originalDisplay = behind.css('display');
@@ -122,16 +169,18 @@ angular.module('btford.dragon-drop', []).
       var element = angular.element($document[0].elementFromPoint(x, y));
 
       behind.css('display', originalDisplay);
-
       return element;
     };
 
     $document.bind('mouseup', function (ev) {
+      clearDrag(delayDrag);
+
       if (!dragValue) {
         return;
       }
 
       var dropArea = getElementBehindPoint(floaty, ev.clientX, ev.clientY);
+      var insertArea = getElementBehindPoint(floaty, ev.clientX, ev.clientY);
 
       var accepts = function () {
         return dropArea.attr('btf-dragon') &&
@@ -143,7 +192,19 @@ angular.module('btford.dragon-drop', []).
         dropArea = dropArea.parent();
       }
 
-      if (dropArea.length > 0) {
+      while (insertArea.length > 0 && !insertArea.hasClass('site-block')) {
+        insertArea = insertArea.parent();
+      }
+
+      if (insertArea.length > 0) {
+        var target = insertArea.scope();
+        var index = target.$index;
+        $rootScope.$apply(function(){
+          insertBefore(dragOrigin, dragValue, index);
+        })
+        $rootScope.$broadcast("UPDATE_DIALS");
+
+      } else if (dropArea.length > 0) {
         var expression = dropArea.attr('btf-dragon');
         var targetScope = dropArea.scope();
         var match = expression.match(/^\s*(.+)\s+in\s+(.*?)\s*$/);
@@ -159,6 +220,7 @@ angular.module('btford.dragon-drop', []).
           add(dragOrigin, dragValue, dragKey);
         });
       }
+      $($(prev_insertTarget).find('.site-inner')[0]).removeClass('ready-insert');
 
       dragValue = dragOrigin = null;
       killFloaty();
@@ -218,7 +280,7 @@ angular.module('btford.dragon-drop', []).
             scope.$apply(function () {
               floaty = template.clone();
               floaty.css('position', 'fixed');
-
+              floaty.css('cursor', 'move');
               floaty.css('margin', '0px');
               floaty.css('z-index', '99999');
 
@@ -238,42 +300,53 @@ angular.module('btford.dragon-drop', []).
             if (dragValue) {
               return;
             }
-            
-            // find the right parent
-            var originElement = angular.element(ev.target);
-            var originScope = originElement.scope();
 
-            while (originScope[valueIdentifier] === undefined) {
-              originScope = originScope.$parent;
-              if (!originScope) {
-                return;
-              }
-            }
-
-            dragValue = originScope[valueIdentifier];
-            dragKey = originScope[keyIdentifier];
-            if (!dragValue) {
+            if (ev.target.className.indexOf("addNew") > -1 || ev.target.className.indexOf('fa-plus') > -1) {
               return;
             }
+            if (ev.button > 0)
+              return;
 
-            // get offset inside element to drag
-            var offset = getElementOffset(ev.target);
+            beginDrag = function(){
+              // find the right parent
+              var originElement = angular.element(ev.target);
+              var originScope = originElement.scope();
 
-            dragOrigin = scope.$eval(rhs);
-            if (duplicate) {
-              dragValue = angular.copy(dragValue);
-            } else {
-              scope.$apply(function () {
-                remove(dragOrigin, dragKey || dragOrigin.indexOf(dragValue));
-              });
-            }
-            dragDuplicate = duplicate;
+              while (originScope[valueIdentifier] === undefined) {
+                originScope = originScope.$parent;
+                if (!originScope) {
+                  return;
+                }
+              }
 
-            offsetX = (ev.pageX - offset.left);
-            offsetY = (ev.pageY - offset.top);
+              dragValue = originScope[valueIdentifier];
+              dragKey = originScope[keyIdentifier];
+              if (!dragValue) {
+                return;
+              }
 
-            spawnFloaty();
-            drag(ev);
+              // get offset inside element to drag
+              var offset = getElementOffset(ev.target);
+
+              dragOrigin = scope.$eval(rhs);
+              dragIndex = dragOrigin.indexOf(dragValue); // save index before remove
+              if (duplicate) {
+                dragValue = angular.copy(dragValue);
+              } else {
+                scope.$apply(function () {
+                  remove(dragOrigin, dragKey || dragOrigin.indexOf(dragValue));
+                });
+              }
+              dragDuplicate = duplicate;
+
+              offsetX = (ev.pageX - offset.left);
+              offsetY = (ev.pageY - offset.top);
+
+              spawnFloaty();
+              drag(ev);
+            };
+
+            delayDrag = triggerDrag(beginDrag);
           });
         };
       }
